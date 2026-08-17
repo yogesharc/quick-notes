@@ -36,7 +36,11 @@ fn delete_note(id: String, app: AppHandle) -> Result<(), String> {
 fn float_above_fullscreen(window: &tauri::WebviewWindow) -> Result<(), Box<dyn std::error::Error>> {
     use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior};
 
-    const NS_STATUS_WINDOW_LEVEL: isize = 25;
+    // Status level (25) sits below the layer macOS composites another app's
+    // full-screen space into, so the window is there but covered. Pop-up menu
+    // level is the lowest one that draws over it — the same level Spotlight and
+    // Raycast use for exactly this.
+    const NS_POPUP_MENU_WINDOW_LEVEL: isize = 101;
 
     let ns_window = unsafe { &*(window.ns_window()? as *mut NSWindow) };
     ns_window.setCollectionBehavior(
@@ -44,7 +48,7 @@ fn float_above_fullscreen(window: &tauri::WebviewWindow) -> Result<(), Box<dyn s
             | NSWindowCollectionBehavior::FullScreenAuxiliary
             | NSWindowCollectionBehavior::Stationary,
     );
-    ns_window.setLevel(NS_STATUS_WINDOW_LEVEL);
+    ns_window.setLevel(NS_POPUP_MENU_WINDOW_LEVEL);
 
     Ok(())
 }
@@ -62,6 +66,10 @@ pub fn run() {
                 _app.set_activation_policy(tauri::ActivationPolicy::Accessory);
                 if let Some(window) = _app.get_webview_window("main") {
                     float_above_fullscreen(&window)?;
+                    // An Accessory app is not activated by being launched, so
+                    // without this the window arrives unfocused and the first
+                    // keystroke goes to whatever was already frontmost.
+                    let _ = window.set_focus();
                 }
             }
             Ok(())
@@ -78,6 +86,20 @@ pub fn run() {
             updater::check_update,
             updater::install_update
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|_app, _event| {
+            // Launching an already-running app sends Reopen rather than
+            // starting a second copy. Without handling it, opening Quick Notes
+            // from a Space where it is already showing looks like nothing
+            // happened — the window is there, just behind and unfocused.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = _event {
+                use tauri::Manager;
+                if let Some(window) = _app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+        });
 }
