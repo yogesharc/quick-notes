@@ -83,7 +83,9 @@ pub fn list_notes(app: &AppHandle) -> Result<Vec<Note>> {
             }
 
             let mut contents = fs::read_to_string(&path)?;
-            contents.truncate(60);
+            if let Some((idx, _)) = contents.char_indices().nth(60) {
+                contents.truncate(idx);
+            }
             let modified = DateTime::<Local>::from(entry.metadata()?.modified()?);
             let id;
 

@@ -60,8 +60,11 @@ export function useNotes() {
   async function updateNote(id: string, nextContents: string) {
     try {
       await invoke("update_note", { id, contents: nextContents });
+      const modified = new Date().toISOString();
       setNotes((prev) =>
-        prev.map((n) => (n.id === id ? { ...n, contents: nextContents } : n)),
+        prev.map((n) =>
+          n.id === id ? { ...n, contents: nextContents, modified } : n,
+        ),
       );
       setError("");
     } catch {

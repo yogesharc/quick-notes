@@ -10,11 +10,23 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "quick-notes",
-        "width": 800,
-        "height": 600
+        "title": "Quick Notes",
+        "width": 400,
+        "height": 560,
+        "minWidth": 320,
+        "minHeight": 280,
+        "alwaysOnTop": true,
+        "transparent": true,
+        "hiddenTitle": true,
+        "titleBarStyle": "Overlay",
+        "windowEffects": {
+          "effects": ["sidebar"],
+          "state": "followsWindowActiveState",
+          "radius": 12
+        }
       }
     ],
     "security": {

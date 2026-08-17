@@ -7,8 +7,11 @@ export default function Note({
 }) {
   return (
     <textarea
+      className="editor"
       value={contents}
       onChange={(e) => onChange(e.target.value)}
+      placeholder="Start writing…"
+      spellCheck={false}
       autoFocus
     />
   );

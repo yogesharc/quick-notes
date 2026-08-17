@@ -1,15 +1,12 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { ArrowLeftIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { useNotes } from "./hooks/useNotes";
-import "./App.css";
 import Note from "./components/Note";
-
-function preview(text: string) {
-  const trimmed = text.trim();
-  if (!trimmed) {
-    return "Untitled";
-  }
-  return trimmed.length > 60 ? `${trimmed.slice(0, 60)}…` : trimmed;
-}
+import NoteRow from "./components/NoteRow";
+import ConfirmDialog from "./components/ConfirmDialog";
+import Shortcut from "./components/Shortcut";
+import { preview } from "./lib/format";
+import "./App.css";
 
 function App() {
   const {
@@ -24,6 +21,9 @@ function App() {
     contents,
     setContents,
   } = useNotes();
+
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const pendingNote = notes.find((n) => n.id === pendingDeleteId) ?? null;
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -49,40 +49,60 @@ function App() {
   }, [newNote, goBack]);
 
   return (
-    <main className="container">
+    <main className="app">
+      <header className="topbar" data-tauri-drag-region>
+        {selectedNoteId ? (
+          <>
+          <Shortcut letter="B" />
+          <button type="button" className="btn" onClick={goBack}>
+            <ArrowLeftIcon />
+          </button>
+          </>
+        ) : (
+          <>
+            <Shortcut letter="N" />
+            <button type="button" className="btn" onClick={newNote}>
+              <PlusIcon />
+            </button>
+            </>
+        )}
+      </header>
+
       {selectedNoteId ? (
-        <>
-          <button type="button" onClick={goBack} aria-label="Back">
-            ←
-          </button>
-          {selectedNote && (
-            <Note contents={contents} onChange={setContents} />
-          )}
-        </>
+        selectedNote && <Note contents={contents} onChange={setContents} />
+      ) : notes.length === 0 ? (
+        <div className="empty">
+          <p>No notes yet</p>
+          <p className="empty-hint">
+            Press <Shortcut letter="N" /> to start one
+          </p>
+        </div>
       ) : (
-        <>
-          <button type="button" onClick={newNote}>
-            New Note +
-          </button>
-          <div>
-            {notes.map((item) => (
-              <div key={item.id} className="row">
-                <button type="button" onClick={() => getNote(item.id)}>
-                  {preview(item.contents)}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => deleteNote(item.id)}
-                  aria-label="Delete note"
-                >
-                  Delete
-                </button>
-              </div>
-            ))}
-          </div>
-        </>
+        <div className="list">
+          {notes.map((item) => (
+            <NoteRow
+              key={item.id}
+              note={item}
+              onOpen={() => getNote(item.id)}
+              onDelete={() => setPendingDeleteId(item.id)}
+            />
+          ))}
+        </div>
       )}
-      {error && <p>{error}</p>}
+
+      {pendingNote && (
+        <ConfirmDialog
+          title="Delete note?"
+          description={`“${preview(pendingNote.contents)}” will be permanently deleted.`}
+          onCancel={() => setPendingDeleteId(null)}
+          onConfirm={() => {
+            deleteNote(pendingNote.id);
+            setPendingDeleteId(null);
+          }}
+        />
+      )}
+
+      {error && <p className="error">{error}</p>}
     </main>
   );
 }
