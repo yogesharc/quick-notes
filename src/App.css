@@ -7,6 +7,8 @@
   --muted: rgba(235, 235, 245, 0.42);
   --muted-strong: rgba(235, 235, 245, 0.62);
   --danger: #ff5f57;
+  --todo: rgba(235, 235, 245, 0.45);
+  --todo-done: #2e9753;
   --radius: 8px;
 
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter,
@@ -61,11 +63,6 @@ button {
   background: var(--tint);
   -webkit-user-select: none;
   user-select: none;
-}
-
-.editor {
-  -webkit-user-select: text;
-  user-select: text;
 }
 
 .topbar {
@@ -155,7 +152,7 @@ button {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 4px 0 6px;
+  padding: 0 4px 0 14px;
   height: 36px;
   border-radius: var(--radius);
   transition: background 0.11s ease;
@@ -201,6 +198,7 @@ button {
   /* opacity < 1 makes this a stacking context, so it would otherwise paint
      above the trash button it shares a grid cell with and eat its clicks. */
   pointer-events: none;
+  margin-right: 8px;
 }
 
 .row-delete {
@@ -294,24 +292,66 @@ button {
 
 /* Editor ------------------------------------------------------------------ */
 
-.editor {
+.editor-wrap {
+  position: relative;
   flex: 1 1 auto;
-  width: 100%;
-  padding: 12px 12px 32px;
+  min-height: 0;
+}
+
+/* The mirror and the textarea must lay text out identically, character for
+   character, or the caret drifts away from the text you can see. */
+.editor,
+.editor-mirror {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 12px 20px 32px;
   border: none;
-  outline: none;
-  resize: none;
-  background: transparent;
-  color: var(--text);
-  caret-color: #6ea8ff;
   font-family: inherit;
   font-size: 14px;
   line-height: 1.5;
   letter-spacing: -0.003em;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  tab-size: 4;
+}
+
+.editor {
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: transparent;
+  caret-color: #6ea8ff;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.editor::-webkit-scrollbar {
+  width: 0;
 }
 
 .editor::placeholder {
   color: rgba(235, 235, 245, 0.26);
+}
+
+.editor-mirror {
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--text);
+}
+
+.todo-box {
+  color: var(--todo);
+}
+
+.todo-box.is-done {
+  color: var(--todo-done);
+}
+
+.todo-label.is-done {
+  opacity: 0.42;
 }
 
 /* Empty state ------------------------------------------------------------- */
