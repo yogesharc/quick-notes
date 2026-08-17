@@ -1,6 +1,8 @@
 # Quick Notes
 
-A small always-on-top notes overlay for macOS. Tauri + React + TypeScript.
+Always on top notes for macOS. A free Raycast Notes alternative.
+
+Built with Tauri + React + TypeScript.
 
 ```sh
 pnpm install
