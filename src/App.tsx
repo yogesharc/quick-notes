@@ -8,7 +8,6 @@ import "./App.css";
 
 function App() {
   const {
-    notes,
     selectedNoteId,
     error,
     selectedNote,
@@ -18,6 +17,9 @@ function App() {
     goBack,
     contents,
     setContents,
+    searchKeyword,
+    setSearchKeyword,
+    visibleNotes
   } = useNotes();
 
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
@@ -93,18 +95,25 @@ function App() {
         )}
       </header>
 
+      <input placeholder="Search..." value={searchKeyword} onChange={(e) => setSearchKeyword(e.target.value)} />
+
       {selectedNoteId ? (
         selectedNote && <Note contents={contents} onChange={setContents} />
-      ) : notes.length === 0 ? (
+      ) : visibleNotes.length === 0 ? (
         <div className="empty">
+          {!searchKeyword ? 
+          <>
           <p>No notes yet</p>
           <p className="empty-hint">
             Press <Shortcut letter="N" /> to start one
           </p>
+          </>
+          : <p>No matches found</p>
+}
         </div>
       ) : (
         <div className="list">
-          {notes.map((item) => (
+          {visibleNotes.map((item) => (
             <NoteRow
               key={item.id}
               note={item}
@@ -118,6 +127,7 @@ function App() {
               }}
             />
           ))}
+  
         </div>
       )}
 

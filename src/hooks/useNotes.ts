@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 export type Note = {
@@ -30,6 +30,8 @@ export function useNotes() {
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [contents, setContents] = useState("");
   const [error, setError] = useState("");
+  const [searchKeyword, setSearchKeyword] = useState("");
+
 
   const selectedNote = notes.find((note) => note.id === selectedNoteId) ?? null;
 
@@ -167,9 +169,11 @@ export function useNotes() {
     return () => clearTimeout(timeoutId);
   }, [contents, selectedNoteId]);
 
+  const visibleNotes = useMemo(() => {
+    return searchKeyword ? notes.filter((n) => n.contents.includes(searchKeyword)) : notes
+  }, [searchKeyword, notes])
 
   return {
-    notes,
     selectedNoteId,
     error,
     selectedNote,
@@ -179,5 +183,8 @@ export function useNotes() {
     goBack,
     contents,
     setContents,
+    searchKeyword,
+    setSearchKeyword,
+    visibleNotes
   };
 }
