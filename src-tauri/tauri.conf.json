@@ -11,27 +11,7 @@
   },
   "app": {
     "macOSPrivateApi": true,
-    "windows": [
-      {
-        "title": "Quick Notes",
-        "width": 400,
-        "height": 560,
-        "minWidth": 320,
-        "minHeight": 280,
-        "alwaysOnTop": true,
-        "visibleOnAllWorkspaces": true,
-        "minimizable": false,
-        "maximizable": false,
-        "transparent": true,
-        "hiddenTitle": true,
-        "titleBarStyle": "Overlay",
-        "windowEffects": {
-          "effects": ["sidebar"],
-          "state": "followsWindowActiveState",
-          "radius": 12
-        }
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }

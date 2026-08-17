@@ -53,25 +53,43 @@ fn float_above_fullscreen(window: &tauri::WebviewWindow) -> Result<(), Box<dyn s
     Ok(())
 }
 
+/// Orders the window in without making it key first. The distinction matters:
+/// `show()`/`set_focus()` go through `makeKeyAndOrderFront`, and when a
+/// background app calls that while another app's full-screen Space is active,
+/// the window server banishes the window to the Desktop Space and pins it
+/// there for the window's lifetime — `CanJoinAllSpaces` is ignored from then
+/// on and no amount of re-showing rebinds it. `orderFrontRegardless` as the
+/// window's first ordering honors the collection behavior.
+#[cfg(target_os = "macos")]
+fn show_overlay(window: &tauri::WebviewWindow) -> Result<(), Box<dyn std::error::Error>> {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSApplication, NSWindow};
+
+    float_above_fullscreen(window)?;
+    let ns_window = unsafe { &*(window.ns_window()? as *mut NSWindow) };
+    ns_window.orderFrontRegardless();
+
+    // Focus without reordering: tao's set_focus() is makeKeyAndOrderFront,
+    // which would re-punt the window (see above). makeKeyWindow only takes
+    // key status; the activation is what lets an Accessory app type-focus at
+    // all, and it activates in place without a Space switch.
+    let mtm = MainThreadMarker::new().ok_or("show_overlay called off the main thread")?;
+    let app = NSApplication::sharedApplication(mtm);
+    #[allow(deprecated)]
+    app.activateIgnoringOtherApps(true);
+    ns_window.makeKeyWindow();
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|_app| {
+            // Activating a Regular (Dock) app makes macOS switch to a Space
+            // that owns its windows, kicking the user out of full-screen.
+            // Accessory apps activate in place, so the overlay stays put.
             #[cfg(target_os = "macos")]
-            {
-                use tauri::Manager;
-                // Activating a Regular (Dock) app makes macOS switch to a Space
-                // that owns its windows, kicking the user out of full-screen.
-                // Accessory apps activate in place, so the overlay stays put.
-                _app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-                if let Some(window) = _app.get_webview_window("main") {
-                    float_above_fullscreen(&window)?;
-                    // An Accessory app is not activated by being launched, so
-                    // without this the window arrives unfocused and the first
-                    // keystroke goes to whatever was already frontmost.
-                    let _ = window.set_focus();
-                }
-            }
+            _app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
@@ -89,16 +107,64 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|_app, _event| {
-            // Launching an already-running app sends Reopen rather than
-            // starting a second copy. Without handling it, opening Quick Notes
-            // from a Space where it is already showing looks like nothing
-            // happened — the window is there, just behind and unfocused.
             #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Reopen { .. } = _event {
+            {
                 use tauri::Manager;
-                if let Some(window) = _app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
+                match _event {
+                    // The main window is NOT in tauri.conf.json: config
+                    // windows are created during app launch, and a window
+                    // created that early gets pinned to the Desktop Space by
+                    // the window server for its whole lifetime —
+                    // CanJoinAllSpaces set later is ignored, so the overlay
+                    // never appears over other Spaces or full-screen apps.
+                    // Windows created after launch bind to every Space
+                    // correctly, so the window is built here instead.
+                    tauri::RunEvent::Ready => {
+                        let window = tauri::WebviewWindowBuilder::new(
+                            _app,
+                            "main",
+                            tauri::WebviewUrl::App("index.html".into()),
+                        )
+                        .title("Quick Notes")
+                        .inner_size(400.0, 560.0)
+                        .min_inner_size(320.0, 280.0)
+                        .minimizable(false)
+                        .maximizable(false)
+                        .transparent(true)
+                        .hidden_title(true)
+                        .title_bar_style(tauri::TitleBarStyle::Overlay)
+                        .effects(tauri::utils::config::WindowEffectsConfig {
+                            effects: vec![tauri::utils::WindowEffect::Sidebar],
+                            state: Some(
+                                tauri::utils::WindowEffectState::FollowsWindowActiveState,
+                            ),
+                            radius: Some(12.0),
+                            color: None,
+                        })
+                        .always_on_top(true)
+                        .visible(false)
+                        .build();
+                        match window {
+                            Ok(window) => {
+                                if let Err(e) = show_overlay(&window) {
+                                    eprintln!("[show_overlay] {e}");
+                                }
+                            }
+                            Err(e) => eprintln!("[window build] {e}"),
+                        }
+                    }
+                    // Launching an already-running app sends Reopen rather
+                    // than starting a second copy. Without handling it,
+                    // opening Quick Notes looks like nothing happened — the
+                    // window is there, just behind and unfocused.
+                    tauri::RunEvent::Reopen { .. } => {
+                        if let Some(window) = _app.get_webview_window("main") {
+                            if let Err(e) = show_overlay(&window) {
+                                eprintln!("[show_overlay] {e}");
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         });
