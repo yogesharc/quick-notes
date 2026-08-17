@@ -55,6 +55,10 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             {
                 use tauri::Manager;
+                // Activating a Regular (Dock) app makes macOS switch to a Space
+                // that owns its windows, kicking the user out of full-screen.
+                // Accessory apps activate in place, so the overlay stays put.
+                _app.set_activation_policy(tauri::ActivationPolicy::Accessory);
                 if let Some(window) = _app.get_webview_window("main") {
                     float_above_fullscreen(&window)?;
                 }

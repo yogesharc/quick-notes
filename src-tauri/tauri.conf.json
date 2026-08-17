@@ -19,6 +19,7 @@
         "minWidth": 320,
         "minHeight": 280,
         "alwaysOnTop": true,
+        "visibleOnAllWorkspaces": true,
         "minimizable": false,
         "maximizable": false,
         "transparent": true,
