@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { ArrowLeftIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { useNotes } from "./hooks/useNotes";
+import { useUpdater } from "./hooks/useUpdater";
 import Note from "./components/Note";
 import NoteRow from "./components/NoteRow";
 import Shortcut from "./components/Shortcut";
+import UpdateBar from "./components/UpdateBar";
 import "./App.css";
 
 function App() {
@@ -21,6 +23,8 @@ function App() {
     setSearchKeyword,
     visibleNotes
   } = useNotes();
+
+  const { updateVersion, install } = useUpdater();
 
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
@@ -139,6 +143,8 @@ function App() {
   
         </div>
       )}
+
+      {updateVersion && <UpdateBar version={updateVersion} onInstall={install} />}
 
       {error && <p className="error">{error}</p>}
     </main>

@@ -419,6 +419,49 @@ button {
   color: var(--muted);
 }
 
+/* Update bar -------------------------------------------------------------- */
+
+.update-bar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0 12px;
+  height: 34px;
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  color: var(--muted-strong);
+  transition: background 0.11s ease;
+  animation: fade 0.15s ease;
+}
+
+.update-bar:hover {
+  background: var(--fill);
+}
+
+.update-bar:focus-visible {
+  outline: 2px solid rgba(120, 170, 255, 0.9);
+  outline-offset: -2px;
+}
+
+.update-bar svg {
+  width: 13px;
+  height: 13px;
+  stroke-width: 1.9;
+  color: var(--muted);
+}
+
+/* Negative margin against the flex gap, so the version reads as part of the
+   label rather than a third item in the row. */
+.update-version {
+  margin-left: -3px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
 /* Error ------------------------------------------------------------------- */
 
 .error {

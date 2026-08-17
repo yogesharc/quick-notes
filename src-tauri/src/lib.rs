@@ -2,6 +2,7 @@ use crate::store::Note;
 use tauri::AppHandle;
 
 mod store;
+mod updater;
 
 #[tauri::command]
 fn new_note(app: AppHandle) -> Result<Note, String> {
@@ -66,12 +67,16 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updater::PendingUpdate::default())
         .invoke_handler(tauri::generate_handler![
             new_note,
             get_note,
             update_note,
             list_notes,
-            delete_note
+            delete_note,
+            updater::check_update,
+            updater::install_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
