@@ -145,16 +145,16 @@ button {
 .search {
   flex: 0 0 auto;
   width: 100%;
-  height: 36px;
-  /* Matches .row's own padding plus the 4px .list inset, so the caret and the
-     row titles below it sit on the same line. */
-  padding: 0 8px 0 18px;
+  /* Top padding, line box and left inset all match .editor, so search text, row
+     titles and a note's first line share the same origin. */
+  padding: 12px 8px 8px 20px;
   margin: 0;
   border: none;
   outline: none;
   background: transparent;
   font-family: inherit;
   font-size: 14px;
+  line-height: 1.5;
   letter-spacing: -0.005em;
   color: var(--text);
   -webkit-user-select: text;
@@ -190,7 +190,8 @@ button {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 4px 0 14px;
+  /* 16px + the 4px .list inset lines row titles up with .editor and .search. */
+  padding: 0 4px 0 16px;
   height: 36px;
   border-radius: var(--radius);
   transition: background 0.11s ease;
@@ -236,7 +237,7 @@ button {
   /* opacity < 1 makes this a stacking context, so it would otherwise paint
      above the trash button it shares a grid cell with and eat its clicks. */
   pointer-events: none;
-  margin-right: 8px;
+  margin-right: 12px;
 }
 
 .row-delete {
