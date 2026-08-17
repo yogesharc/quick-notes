@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowLeftIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { useNotes } from "./hooks/useNotes";
+import { useReadyToShow } from "./hooks/useReadyToShow";
 import { useUpdater } from "./hooks/useUpdater";
 import Note from "./components/Note";
 import NoteRow from "./components/NoteRow";
@@ -10,6 +11,7 @@ import "./App.css";
 
 function App() {
   const {
+    booted,
     selectedNoteId,
     error,
     selectedNote,
@@ -25,6 +27,8 @@ function App() {
   } = useNotes();
 
   const { updateVersion, install } = useUpdater();
+
+  useReadyToShow(booted);
 
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 

@@ -31,6 +31,7 @@ export function useNotes() {
   const [contents, setContents] = useState("");
   const [error, setError] = useState("");
   const [searchKeyword, setSearchKeyword] = useState("");
+  const [booted, setBooted] = useState(false);
 
 
   const selectedNote = notes.find((note) => note.id === selectedNoteId) ?? null;
@@ -134,21 +135,22 @@ export function useNotes() {
 
     async function boot() {
       const listed = await listNotes();
-      if (cancelled || listed == null) {
+      if (cancelled) {
         return;
       }
 
-      const savedId = getSelectedNoteId();
-      if (!savedId) {
-        return;
+      const savedId = listed && getSelectedNoteId();
+      if (savedId) {
+        if (listed.some((n) => n.id === savedId)) {
+          await getNote(savedId);
+        } else {
+          persistSelectedNoteId(null);
+        }
       }
 
-      if (!listed.some((n) => n.id === savedId)) {
-        persistSelectedNoteId(null);
-        return;
+      if (!cancelled) {
+        setBooted(true);
       }
-
-      await getNote(savedId);
     }
 
     boot();
@@ -174,6 +176,7 @@ export function useNotes() {
   }, [searchKeyword, notes])
 
   return {
+    booted,
     selectedNoteId,
     error,
     selectedNote,

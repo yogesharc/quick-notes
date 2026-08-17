@@ -1,8 +1,14 @@
 use crate::store::Note;
-use tauri::AppHandle;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::{AppHandle, Manager, State};
 
 mod store;
 mod updater;
+
+/// Set once the window has been ordered in, so the frontend's ready signal and
+/// the fallback timer can't both reveal it.
+#[derive(Default)]
+struct Revealed(AtomicBool);
 
 #[tauri::command]
 fn new_note(app: AppHandle) -> Result<Note, String> {
@@ -81,6 +87,34 @@ fn show_overlay(window: &tauri::WebviewWindow) -> Result<(), Box<dyn std::error:
     Ok(())
 }
 
+fn reveal(app: &AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+
+    #[cfg(target_os = "macos")]
+    if let Err(e) = show_overlay(&window) {
+        eprintln!("[show_overlay] {e}");
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+/// The window is built hidden: showing it before the webview has painted gives
+/// an empty pane for a few frames. The frontend calls this once its first real
+/// frame is on screen.
+#[tauri::command]
+fn ready_to_show(app: AppHandle, revealed: State<Revealed>) {
+    if revealed.0.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    reveal(&app);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -95,7 +129,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updater::PendingUpdate::default())
+        .manage(Revealed::default())
         .invoke_handler(tauri::generate_handler![
+            ready_to_show,
             new_note,
             get_note,
             update_note,
@@ -109,7 +145,6 @@ pub fn run() {
         .run(|_app, _event| {
             #[cfg(target_os = "macos")]
             {
-                use tauri::Manager;
                 match _event {
                     // The main window is NOT in tauri.conf.json: config
                     // windows are created during app launch, and a window
@@ -145,10 +180,28 @@ pub fn run() {
                         .visible(false)
                         .build();
                         match window {
-                            Ok(window) => {
-                                if let Err(e) = show_overlay(&window) {
-                                    eprintln!("[show_overlay] {e}");
-                                }
+                            // Nothing shows the window here — the frontend
+                            // calls ready_to_show once it has painted. This
+                            // timer is only a backstop for a frontend that
+                            // never boots, so the app can't end up running
+                            // with no visible window at all.
+                            Ok(_) => {
+                                let handle = _app.clone();
+                                std::thread::spawn(move || {
+                                    std::thread::sleep(
+                                        std::time::Duration::from_millis(3000),
+                                    );
+                                    let _ = handle.clone().run_on_main_thread(move || {
+                                        if !handle
+                                            .state::<Revealed>()
+                                            .0
+                                            .swap(true, Ordering::SeqCst)
+                                        {
+                                            eprintln!("[reveal] frontend never signalled");
+                                            reveal(&handle);
+                                        }
+                                    });
+                                });
                             }
                             Err(e) => eprintln!("[window build] {e}"),
                         }
@@ -157,13 +210,7 @@ pub fn run() {
                     // than starting a second copy. Without handling it,
                     // opening Quick Notes looks like nothing happened — the
                     // window is there, just behind and unfocused.
-                    tauri::RunEvent::Reopen { .. } => {
-                        if let Some(window) = _app.get_webview_window("main") {
-                            if let Err(e) = show_overlay(&window) {
-                                eprintln!("[show_overlay] {e}");
-                            }
-                        }
-                    }
+                    tauri::RunEvent::Reopen { .. } => reveal(_app),
                     _ => {}
                 }
             }
