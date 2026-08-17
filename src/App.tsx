@@ -3,9 +3,7 @@ import { ArrowLeftIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { useNotes } from "./hooks/useNotes";
 import Note from "./components/Note";
 import NoteRow from "./components/NoteRow";
-import ConfirmDialog from "./components/ConfirmDialog";
 import Shortcut from "./components/Shortcut";
-import { preview } from "./lib/format";
 import "./App.css";
 
 function App() {
@@ -23,7 +21,34 @@ function App() {
   } = useNotes();
 
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
-  const pendingNote = notes.find((n) => n.id === pendingDeleteId) ?? null;
+
+  // Esc, or a click anywhere outside the row, backs out of a pending delete.
+  useEffect(() => {
+    if (!pendingDeleteId) {
+      return;
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setPendingDeleteId(null);
+      }
+    }
+
+    function onMouseDown(event: MouseEvent) {
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest(".row-confirming")) {
+        setPendingDeleteId(null);
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    document.addEventListener("mousedown", onMouseDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("mousedown", onMouseDown);
+    };
+  }, [pendingDeleteId]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -50,7 +75,7 @@ function App() {
 
   return (
     <main className="app">
-      <header className="topbar" data-tauri-drag-region>
+      <header className="topbar" data-tauri-drag-region="deep">
         {selectedNoteId ? (
           <>
           <Shortcut letter="B" />
@@ -83,23 +108,17 @@ function App() {
             <NoteRow
               key={item.id}
               note={item}
+              confirming={pendingDeleteId === item.id}
               onOpen={() => getNote(item.id)}
               onDelete={() => setPendingDeleteId(item.id)}
+              onCancelDelete={() => setPendingDeleteId(null)}
+              onConfirmDelete={() => {
+                deleteNote(item.id);
+                setPendingDeleteId(null);
+              }}
             />
           ))}
         </div>
-      )}
-
-      {pendingNote && (
-        <ConfirmDialog
-          title="Delete note?"
-          description={`“${preview(pendingNote.contents)}” will be permanently deleted.`}
-          onCancel={() => setPendingDeleteId(null)}
-          onConfirm={() => {
-            deleteNote(pendingNote.id);
-            setPendingDeleteId(null);
-          }}
-        />
       )}
 
       {error && <p className="error">{error}</p>}
