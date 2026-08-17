@@ -63,12 +63,19 @@ if (( ${#MISSING[@]} )); then
   exit 1
 fi
 
-# The bundler reads the key's contents, not its path, when both are set — and
-# `~` in a path never expands inside a sourced value.
-TAURI_SIGNING_PRIVATE_KEY_PATH="${TAURI_SIGNING_PRIVATE_KEY_PATH/#\~/$HOME}"
-[[ -f "$TAURI_SIGNING_PRIVATE_KEY_PATH" ]] || {
-  echo "signing key not found: $TAURI_SIGNING_PRIVATE_KEY_PATH" >&2; exit 1; }
-export TAURI_SIGNING_PRIVATE_KEY_PATH
+# `~` never expands inside a sourced value.
+KEY_PATH="${TAURI_SIGNING_PRIVATE_KEY_PATH/#\~/$HOME}"
+[[ -f "$KEY_PATH" ]] || { echo "signing key not found: $KEY_PATH" >&2; exit 1; }
+
+# The bundler prefers TAURI_SIGNING_PRIVATE_KEY — the key's *contents* — over
+# the _PATH form, and takes it from the ambient environment. A key exported by
+# ~/.zshrc for some other app therefore wins over this repo's, and the mismatch
+# surfaces only at the very last step of the build, as "wrong password for that
+# key". Read the file here and set the variable the bundler actually reads,
+# clearing the one it would ignore, so .env.release is the only thing that
+# decides which key signs this app.
+export TAURI_SIGNING_PRIVATE_KEY="$(cat "$KEY_PATH")"
+unset TAURI_SIGNING_PRIVATE_KEY_PATH
 
 gh auth status >/dev/null 2>&1 || { echo "gh is not logged in — run: gh auth login" >&2; exit 1; }
 
