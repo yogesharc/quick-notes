@@ -59,6 +59,25 @@ fn float_above_fullscreen(window: &tauri::WebviewWindow) -> Result<(), Box<dyn s
     Ok(())
 }
 
+/// Puts the window on screen fully transparent. A window the window server
+/// can't see produces no frames, so a hidden webview doesn't paint at all —
+/// it only starts once the window is ordered in, which is what was left of
+/// the launch flash. Staged this way it paints against a window nobody can
+/// see, and revealing is then just an alpha change over painted content.
+#[cfg(target_os = "macos")]
+fn stage_overlay(window: &tauri::WebviewWindow) -> Result<(), Box<dyn std::error::Error>> {
+    use objc2_app_kit::NSWindow;
+
+    float_above_fullscreen(window)?;
+    let ns_window = unsafe { &*(window.ns_window()? as *mut NSWindow) };
+    ns_window.setAlphaValue(0.0);
+    // Invisible but still hit-testable, so a click meant for whatever is
+    // underneath would land here instead during the staging window.
+    ns_window.setIgnoresMouseEvents(true);
+    ns_window.orderFrontRegardless();
+    Ok(())
+}
+
 /// Orders the window in without making it key first. The distinction matters:
 /// `show()`/`set_focus()` go through `makeKeyAndOrderFront`, and when a
 /// background app calls that while another app's full-screen Space is active,
@@ -73,6 +92,8 @@ fn show_overlay(window: &tauri::WebviewWindow) -> Result<(), Box<dyn std::error:
 
     float_above_fullscreen(window)?;
     let ns_window = unsafe { &*(window.ns_window()? as *mut NSWindow) };
+    ns_window.setAlphaValue(1.0);
+    ns_window.setIgnoresMouseEvents(false);
     ns_window.orderFrontRegardless();
 
     // Focus without reordering: tao's set_focus() is makeKeyAndOrderFront,
@@ -180,12 +201,16 @@ pub fn run() {
                         .visible(false)
                         .build();
                         match window {
-                            // Nothing shows the window here — the frontend
-                            // calls ready_to_show once it has painted. This
+                            // Staged transparent, not shown: the frontend
+                            // calls ready_to_show once it has painted. The
                             // timer is only a backstop for a frontend that
                             // never boots, so the app can't end up running
                             // with no visible window at all.
-                            Ok(_) => {
+                            Ok(window) => {
+                                if let Err(e) = stage_overlay(&window) {
+                                    eprintln!("[stage_overlay] {e}");
+                                }
+
                                 let handle = _app.clone();
                                 std::thread::spawn(move || {
                                     std::thread::sleep(
