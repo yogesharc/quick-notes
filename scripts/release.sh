@@ -6,10 +6,16 @@
 #   ./scripts/release.sh minor     # 0.1.0 -> 0.2.0
 #   ./scripts/release.sh major     # 0.1.0 -> 1.0.0
 #   ./scripts/release.sh 0.2.0     # or say it outright
+#   ./scripts/release.sh publish   # resume: publish the already-built current version
 #
 # The version is written into package.json, tauri.conf.json and Cargo.toml,
 # committed and tagged, then a universal macOS bundle is built and attached to a
 # GitHub release along with latest.json — the manifest the app's updater reads.
+#
+# `publish` exists because the last step talks to GitHub and GitHub goes down.
+# Everything before it — a signed, notarized build and a pushed tag — is far too
+# expensive to redo for a 503, and re-running a bump would strand the tag that
+# already shipped. It republishes from the artifacts still in target/.
 
 set -euo pipefail
 
@@ -24,7 +30,7 @@ for cmd in pnpm gh jq cargo; do
 done
 
 usage() {
-  echo "usage: $0 <patch|minor|major|x.y.z>" >&2
+  echo "usage: $0 <patch|minor|major|x.y.z|publish>" >&2
   exit 1
 }
 
@@ -35,15 +41,21 @@ CURRENT="$(jq -r .version src-tauri/tauri.conf.json)"
   echo "tauri.conf.json has a version this script can't bump: $CURRENT" >&2; exit 1; }
 IFS=. read -r MAJOR MINOR PATCH <<< "$CURRENT"
 
+PUBLISH_ONLY=false
 case "${1:-}" in
-  patch) VERSION="$MAJOR.$MINOR.$((PATCH + 1))" ;;
-  minor) VERSION="$MAJOR.$((MINOR + 1)).0" ;;
-  major) VERSION="$((MAJOR + 1)).0.0" ;;
-  *.*.*) VERSION="$1"; [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || usage ;;
-  *)     usage ;;
+  patch)   VERSION="$MAJOR.$MINOR.$((PATCH + 1))" ;;
+  minor)   VERSION="$MAJOR.$((MINOR + 1)).0" ;;
+  major)   VERSION="$((MAJOR + 1)).0.0" ;;
+  publish) VERSION="$CURRENT"; PUBLISH_ONLY=true ;;
+  *.*.*)   VERSION="$1"; [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || usage ;;
+  *)       usage ;;
 esac
 
-echo "==> $CURRENT -> $VERSION"
+if $PUBLISH_ONLY; then
+  echo "==> republishing v$VERSION from existing artifacts"
+else
+  echo "==> $CURRENT -> $VERSION"
+fi
 
 # Credentials live outside the repo's history. Everything below is checked as a
 # set, so a half-filled file names all of its gaps in one run rather than one
@@ -88,25 +100,36 @@ done
 [[ -z "$(git status --porcelain)" ]] || { echo "working tree is dirty" >&2; exit 1; }
 
 TAG="v$VERSION"
-if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-  echo "tag $TAG already exists" >&2
+if $PUBLISH_ONLY; then
+  # The inverse of the fresh-release check: resuming is only meaningful for a
+  # tag that already exists, and only while GitHub has no release on it yet.
+  git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || {
+    echo "tag $TAG does not exist — nothing to resume" >&2; exit 1; }
+  if gh release view "$TAG" --repo yogesharc/quick-notes >/dev/null 2>&1; then
+    echo "release $TAG already published" >&2
+    exit 1
+  fi
+elif git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+  echo "tag $TAG already exists — did a publish fail? try: $0 publish" >&2
   exit 1
 fi
 
-echo "==> writing version"
-jq --arg v "$VERSION" '.version = $v' package.json > package.json.tmp
-mv package.json.tmp package.json
-jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > src-tauri/tauri.conf.json.tmp
-mv src-tauri/tauri.conf.json.tmp src-tauri/tauri.conf.json
-# Anchored to the [package] block's own key, so a dependency pinned to the same
-# string is never rewritten.
-/usr/bin/sed -i '' "1,/^\[/ s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
-# Rewrites Cargo.lock's own record of the version, so the commit below isn't
-# immediately followed by a dirty tree.
-cargo metadata --manifest-path src-tauri/Cargo.toml --format-version 1 >/dev/null
+if ! $PUBLISH_ONLY; then
+  echo "==> writing version"
+  jq --arg v "$VERSION" '.version = $v' package.json > package.json.tmp
+  mv package.json.tmp package.json
+  jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > src-tauri/tauri.conf.json.tmp
+  mv src-tauri/tauri.conf.json.tmp src-tauri/tauri.conf.json
+  # Anchored to the [package] block's own key, so a dependency pinned to the
+  # same string is never rewritten.
+  /usr/bin/sed -i '' "1,/^\[/ s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+  # Rewrites Cargo.lock's own record of the version, so the commit below isn't
+  # immediately followed by a dirty tree.
+  cargo metadata --manifest-path src-tauri/Cargo.toml --format-version 1 >/dev/null
 
-echo "==> building universal bundle (this signs and notarizes; expect several minutes)"
-pnpm tauri build --target universal-apple-darwin
+  echo "==> building universal bundle (this signs and notarizes; expect several minutes)"
+  pnpm tauri build --target universal-apple-darwin
+fi
 
 APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/$(jq -r .productName src-tauri/tauri.conf.json).app"
 
@@ -174,11 +197,13 @@ jq -n \
 # Committed only now, so a failed build publishes no tag and no release. It does
 # leave the bump sitting in the working tree — `git checkout` the four version
 # files to undo it before trying again.
-echo "==> tagging $TAG"
-git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
-git commit -m "release $TAG"
-git tag "$TAG"
-git push origin HEAD "$TAG"
+if ! $PUBLISH_ONLY; then
+  echo "==> tagging $TAG"
+  git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+  git commit -m "release $TAG"
+  git tag "$TAG"
+  git push origin HEAD "$TAG"
+fi
 
 # The .sig is not uploaded: latest.json carries the signature inline, and that
 # is the only copy the updater ever reads.
