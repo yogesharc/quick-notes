@@ -95,7 +95,16 @@ function App() {
         )}
       </header>
 
-      <input placeholder="Search..." value={searchKeyword} onChange={(e) => setSearchKeyword(e.target.value)} />
+      {!selectedNoteId &&
+      <input
+        className="search"
+        type="text"
+        placeholder="Search for notes..."
+        value={searchKeyword}
+        onChange={(e) => setSearchKeyword(e.target.value)}
+        autoFocus={true}
+      />
+      }
 
       {selectedNoteId ? (
         selectedNote && <Note contents={contents} onChange={setContents} />

@@ -140,6 +140,44 @@ button {
   align-items: center;
 }
 
+/* Search ------------------------------------------------------------------ */
+
+.search {
+  flex: 0 0 auto;
+  width: 100%;
+  height: 36px;
+  /* Matches .row's own padding plus the 4px .list inset, so the caret and the
+     row titles below it sit on the same line. */
+  padding: 0 8px 0 18px;
+  margin: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 14px;
+  letter-spacing: -0.005em;
+  color: var(--text);
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.search::placeholder {
+  color: var(--muted);
+}
+
+.search:focus,
+.search:focus-visible {
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+}
+
+.search::-webkit-search-cancel-button {
+  display: none;
+}
+
 /* List -------------------------------------------------------------------- */
 
 .list {
