@@ -120,6 +120,28 @@ spctl --assess --verbose=2 --type exec "$APP"
 BUNDLE_DIR="src-tauri/target/universal-apple-darwin/release/bundle"
 UPDATER_SIG="$(ls "$BUNDLE_DIR"/macos/*.app.tar.gz.sig)"
 
+# The app verifies each update against the pubkey compiled into it, so a bundle
+# signed by any other key is refused at runtime — and because the refusal
+# happens on the user's machine, a wrongly-signed release silently ends updates
+# for every existing install with no way to push a correction. The bundler only
+# *warns* about this, and an ambient TAURI_SIGNING_PRIVATE_KEY left over in a
+# shell is enough to cause it, so it is checked here rather than trusted.
+#
+# Both blobs are base64 files whose second line is itself base64; bytes 2..10 of
+# that inner payload are minisign's key id, which is what has to agree.
+echo "==> verifying updater signature key"
+key_id() { base64 -d 2>/dev/null | sed -n '2p' | base64 -d 2>/dev/null | od -An -tx1 -j2 -N8 | tr -d ' \n'; }
+CONF_KEY_ID="$(jq -r '.plugins.updater.pubkey' src-tauri/tauri.conf.json | key_id)"
+SIG_KEY_ID="$(key_id < "$UPDATER_SIG")"
+if [ -z "$CONF_KEY_ID" ] || [ "$SIG_KEY_ID" != "$CONF_KEY_ID" ]; then
+  echo "updater signature was made with the wrong key — refusing to publish" >&2
+  echo "  tauri.conf.json pubkey : ${CONF_KEY_ID:-<unreadable>}" >&2
+  echo "  signing key used       : ${SIG_KEY_ID:-<unreadable>}" >&2
+  echo "check TAURI_SIGNING_PRIVATE_KEY_PATH in .env.release, and make sure no" >&2
+  echo "stale TAURI_SIGNING_PRIVATE_KEY is exported in this shell." >&2
+  exit 1
+fi
+
 # The bundle is named after `productName`, which has a space in it — and GitHub
 # rewrites spaces in release asset names to dots on upload. The manifest URL is
 # written here, before the upload that would rename the file underneath it, so
