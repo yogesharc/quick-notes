@@ -2,7 +2,10 @@
 #
 # Builds, signs, notarizes and publishes a release from this machine.
 #
-#   ./scripts/release.sh 0.2.0
+#   ./scripts/release.sh patch     # 0.1.0 -> 0.1.1
+#   ./scripts/release.sh minor     # 0.1.0 -> 0.2.0
+#   ./scripts/release.sh major     # 0.1.0 -> 1.0.0
+#   ./scripts/release.sh 0.2.0     # or say it outright
 #
 # The version is written into package.json, tauri.conf.json and Cargo.toml,
 # committed and tagged, then a universal macOS bundle is built and attached to a
@@ -12,12 +15,6 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="${1:-}"
-if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "usage: $0 <version>   e.g. $0 0.2.0" >&2
-  exit 1
-fi
-
 # Homebrew and pnpm are not on a non-login shell's PATH, and this script is as
 # likely to be run by an agent as by a person.
 export PATH="$HOME/Library/pnpm:/opt/homebrew/bin:/usr/local/bin:$PATH"
@@ -25,6 +22,28 @@ export PATH="$HOME/Library/pnpm:/opt/homebrew/bin:/usr/local/bin:$PATH"
 for cmd in pnpm gh jq cargo; do
   command -v "$cmd" >/dev/null || { echo "missing required command: $cmd" >&2; exit 1; }
 done
+
+usage() {
+  echo "usage: $0 <patch|minor|major|x.y.z>" >&2
+  exit 1
+}
+
+# tauri.conf.json is the one the manifest and the bundle are both built from, so
+# it is what a bump counts from — the other two files follow it.
+CURRENT="$(jq -r .version src-tauri/tauri.conf.json)"
+[[ "$CURRENT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+  echo "tauri.conf.json has a version this script can't bump: $CURRENT" >&2; exit 1; }
+IFS=. read -r MAJOR MINOR PATCH <<< "$CURRENT"
+
+case "${1:-}" in
+  patch) VERSION="$MAJOR.$MINOR.$((PATCH + 1))" ;;
+  minor) VERSION="$MAJOR.$((MINOR + 1)).0" ;;
+  major) VERSION="$((MAJOR + 1)).0.0" ;;
+  *.*.*) VERSION="$1"; [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || usage ;;
+  *)     usage ;;
+esac
+
+echo "==> $CURRENT -> $VERSION"
 
 # Credentials live outside the repo's history. Everything below is checked as a
 # set, so a half-filled file names all of its gaps in one run rather than one
@@ -67,7 +86,7 @@ if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
   exit 1
 fi
 
-echo "==> bumping to $VERSION"
+echo "==> writing version"
 jq --arg v "$VERSION" '.version = $v' package.json > package.json.tmp
 mv package.json.tmp package.json
 jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > src-tauri/tauri.conf.json.tmp

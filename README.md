@@ -18,7 +18,10 @@ signing key lives at `~/.tauri/quick-notes.key`; its public half is in
 ever be updated again** — back it up somewhere durable.
 
 ```sh
-./scripts/release.sh 0.2.0
+./scripts/release.sh patch     # 0.1.0 -> 0.1.1
+./scripts/release.sh minor     # 0.1.0 -> 0.2.0
+./scripts/release.sh major     # 0.1.0 -> 1.0.0
+./scripts/release.sh 0.4.0     # or say it outright
 ```
 
 That bumps the version in `package.json`, `tauri.conf.json` and `Cargo.toml`,
