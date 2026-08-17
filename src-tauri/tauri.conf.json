@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "quick-notes",
+  "productName": "Quick Notes",
   "version": "0.1.0",
   "identifier": "com.yogesh.quicknotes",
   "build": {

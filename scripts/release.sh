@@ -111,9 +111,18 @@ xcrun stapler validate "$APP"
 spctl --assess --verbose=2 --type exec "$APP"
 
 BUNDLE_DIR="src-tauri/target/universal-apple-darwin/release/bundle"
-UPDATER_TAR="$(ls "$BUNDLE_DIR"/macos/*.app.tar.gz)"
 UPDATER_SIG="$(ls "$BUNDLE_DIR"/macos/*.app.tar.gz.sig)"
-DMG="$(ls "$BUNDLE_DIR"/dmg/*.dmg)"
+
+# The bundle is named after `productName`, which has a space in it — and GitHub
+# rewrites spaces in release asset names to dots on upload. The manifest URL is
+# written here, before the upload that would rename the file underneath it, so
+# the artifacts are staged under names GitHub will leave alone.
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
+UPDATER_TAR="$STAGE/quick-notes-$VERSION-universal.app.tar.gz"
+DMG="$STAGE/quick-notes-$VERSION-universal.dmg"
+cp "$(ls "$BUNDLE_DIR"/macos/*.app.tar.gz)" "$UPDATER_TAR"
+cp "$(ls "$BUNDLE_DIR"/dmg/*.dmg)" "$DMG"
 
 # The updater matches on this exact platform key for a universal build running
 # on Apple silicon; x86_64 is listed too so an Intel Mac finds the same bundle.
@@ -131,22 +140,24 @@ jq -n \
       "darwin-aarch64": { signature: $signature, url: $url },
       "darwin-x86_64":  { signature: $signature, url: $url }
     }
-  }' > latest.json
+  }' > "$STAGE/latest.json"
 
-# Committed only now: a build that fails leaves no version bump to unwind.
+# Committed only now, so a failed build publishes no tag and no release. It does
+# leave the bump sitting in the working tree — `git checkout` the four version
+# files to undo it before trying again.
 echo "==> tagging $TAG"
 git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
 git commit -m "release $TAG"
 git tag "$TAG"
 git push origin HEAD "$TAG"
 
+# The .sig is not uploaded: latest.json carries the signature inline, and that
+# is the only copy the updater ever reads.
 echo "==> publishing release"
 gh release create "$TAG" \
   --title "$TAG" \
   --generate-notes \
-  "$DMG" "$UPDATER_TAR" "$UPDATER_SIG" latest.json
-
-rm -f latest.json
+  "$DMG" "$UPDATER_TAR" "$STAGE/latest.json"
 
 echo
 echo "released $TAG"
