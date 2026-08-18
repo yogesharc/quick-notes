@@ -1,6 +1,6 @@
 [package]
 name = "quick-notes"
-version = "0.1.1"
+version = "0.1.2"
 description = "An always-on-top notes overlay for macOS"
 authors = ["Yogesh Dhakal"]
 license = "MIT"
