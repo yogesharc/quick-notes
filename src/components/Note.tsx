@@ -1,52 +1,32 @@
 import {
-  Fragment,
+  useLayoutEffect,
   useRef,
+  type ClipboardEvent,
   type KeyboardEvent,
   type MouseEvent,
-  type UIEvent,
 } from "react";
 import {
+  applyEdit,
+  getSelectionRange,
+  offsetOfNode,
+  readText,
+  render,
+  scrollCaretIntoView,
+  setSelectionRange,
+  sync,
+} from "../lib/editor-dom";
+import { History } from "../lib/history";
+import {
+  capitalizeItemStart,
   continueList,
-  expandTodoShorthand,
-  parseTodoLine,
+  expandShorthand,
   toggleTodo,
-  toggleTodoIfClicked,
+  type Edit,
 } from "../lib/lists";
+import type { Snapshot } from "../lib/history";
 
-/**
- * A textarea can't style individual characters, so a mirror of the same text
- * sits behind it with the checkboxes marked up. The textarea's own text is
- * transparent — only its caret and selection show through.
- */
-function Mirror({ contents }: { contents: string }) {
-  return (
-    <>
-      {contents.split("\n").map((line, index) => {
-        const todo = parseTodoLine(line);
-        return (
-          <Fragment key={index}>
-            {todo ? (
-              <>
-                {todo.indent}
-                <span className={todo.checked ? "todo-box is-done" : "todo-box"}>
-                  {todo.box}
-                </span>
-                <span
-                  className={todo.checked ? "todo-label is-done" : "todo-label"}
-                >
-                  {todo.label}
-                </span>
-              </>
-            ) : (
-              line
-            )}
-            {"\n"}
-          </Fragment>
-        );
-      })}
-    </>
-  );
-}
+/** Formatting shortcuts the browser would otherwise apply to editable text. */
+const FORMATTING_KEYS = new Set(["b", "i", "u"]);
 
 export default function Note({
   contents,
@@ -55,55 +35,192 @@ export default function Note({
   contents: string;
   onChange: (value: string) => void;
 }) {
-  const mirrorRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const historyRef = useRef(new History({ text: contents, caret: 0 }));
+  const composingRef = useRef(false);
 
-  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    const el = event.currentTarget;
+  // The DOM is owned by the browser while typing; this only steps in when the
+  // note is swapped out from underneath us.
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root) {
+      return;
+    }
+    // An empty editable has no line block for the browser to type into, so it
+    // would start a bare text node at the root instead.
+    if (root.childNodes.length === 0 || readText(root) !== contents) {
+      render(root, contents);
+      setSelectionRange(root, contents.length);
+      historyRef.current.reset({ text: contents, caret: contents.length });
+    }
+  }, [contents]);
+
+  useLayoutEffect(() => {
+    rootRef.current?.focus();
+  }, []);
+
+  function commit(root: HTMLDivElement, edit: Edit) {
+    applyEdit(root, edit);
+    const text = readText(root);
+    sync(root, text);
+    setSelectionRange(root, edit.caret);
+    scrollCaretIntoView(root);
+    // Structural edits always start their own undo step.
+    historyRef.current.record({ text, caret: edit.caret }, Date.now(), true);
+    onChange(text);
+  }
+
+  function restore(root: HTMLDivElement, snapshot: Snapshot) {
+    render(root, snapshot.text);
+    setSelectionRange(root, snapshot.caret);
+    scrollCaretIntoView(root);
+    onChange(snapshot.text);
+  }
+
+  function onInput() {
+    const root = rootRef.current;
+    if (!root) {
+      return;
+    }
+
+    const text = readText(root);
+
+    // Rebuilding spans mid-composition would tear the IME's own DOM out from
+    // under it, so structure is left alone until the composition commits.
+    if (composingRef.current) {
+      onChange(text);
+      return;
+    }
+
+    const caret = getSelectionRange(root);
+    if (sync(root, text) && caret) {
+      setSelectionRange(root, caret.start, caret.end);
+    }
+    scrollCaretIntoView(root);
+
+    const at = getSelectionRange(root)?.start ?? text.length;
+    const previous = historyRef.current.current.text;
+    // Line changes are structural enough to deserve their own undo step.
+    const separate =
+      text.split("\n").length !== previous.split("\n").length;
+    historyRef.current.record({ text, caret: at }, Date.now(), separate);
+    onChange(text);
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const root = rootRef.current;
     const mod = event.metaKey || event.ctrlKey;
+    if (!root) {
+      return;
+    }
 
-    if (event.key === "Enter" && mod && toggleTodo(el, el.selectionStart)) {
+    if (mod && FORMATTING_KEYS.has(event.key.toLowerCase())) {
       event.preventDefault();
       return;
     }
 
-    if (event.key === "Enter" && !mod && !event.shiftKey && !event.altKey) {
-      if (continueList(el)) {
-        event.preventDefault();
+    if (mod && event.key.toLowerCase() === "z") {
+      event.preventDefault();
+      const snapshot = event.shiftKey
+        ? historyRef.current.redo()
+        : historyRef.current.undo();
+      if (snapshot) {
+        restore(root, snapshot);
       }
       return;
     }
 
-    if (event.key === " " && !mod && !event.altKey && expandTodoShorthand(el)) {
+    const range = getSelectionRange(root);
+    if (!range || event.nativeEvent.isComposing) {
+      return;
+    }
+
+    const text = readText(root);
+    const { start, end } = range;
+
+    const run = (edit: Edit | null) => {
+      if (!edit) {
+        return false;
+      }
       event.preventDefault();
+      commit(root, edit);
+      return true;
+    };
+
+    if (event.key === "Enter" && mod) {
+      run(toggleTodo(text, start));
+      return;
+    }
+
+    if (event.key === "Enter" && !event.shiftKey && !event.altKey) {
+      run(continueList(text, start, end));
+      return;
+    }
+
+    if (event.key === " " && !mod && !event.altKey) {
+      run(expandShorthand(text, start, end));
+      return;
+    }
+
+    if (!mod && !event.altKey) {
+      run(capitalizeItemStart(text, start, end, event.key));
     }
   }
 
-  function onClick(event: MouseEvent<HTMLTextAreaElement>) {
-    toggleTodoIfClicked(event.currentTarget);
+  /** Clicking a checkbox toggles it; the marker is a real element now. */
+  function onClick(event: MouseEvent<HTMLDivElement>) {
+    const root = rootRef.current;
+    const line = (event.target as HTMLElement | null)
+      ?.closest(".box")
+      ?.closest(".ln");
+    if (!root || !line) {
+      return;
+    }
+
+    // Derived from the clicked element rather than the caret, which the click
+    // may have dropped anywhere along the line.
+    const edit = toggleTodo(readText(root), offsetOfNode(root, line));
+    if (edit) {
+      event.preventDefault();
+      commit(root, edit);
+    }
   }
 
-  function onScroll(event: UIEvent<HTMLTextAreaElement>) {
-    if (mirrorRef.current) {
-      mirrorRef.current.scrollTop = event.currentTarget.scrollTop;
+  function onPaste(event: ClipboardEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const text = event.clipboardData.getData("text/plain");
+    if (text) {
+      document.execCommand("insertText", false, text);
     }
   }
 
   return (
     <div className="editor-wrap">
-      <div className="editor-mirror" ref={mirrorRef} aria-hidden="true">
-        <Mirror contents={contents} />
-      </div>
-      <textarea
+      <div
         className="editor"
-        value={contents}
-        onChange={(e) => onChange(e.target.value)}
+        ref={rootRef}
+        contentEditable
+        suppressContentEditableWarning
+        spellCheck={false}
+        role="textbox"
+        aria-multiline="true"
+        onInput={onInput}
+        onCompositionStart={() => {
+          composingRef.current = true;
+        }}
+        onCompositionEnd={() => {
+          composingRef.current = false;
+          onInput();
+        }}
         onKeyDown={onKeyDown}
         onClick={onClick}
-        onScroll={onScroll}
-        placeholder="- bullet list. 1. num list. [ ] for todo. ⌘ + Enter to check"
-        spellCheck={false}
-        autoFocus
+        onPaste={onPaste}
       />
+      {!contents && (
+        <div className="editor-placeholder" aria-hidden="true">
+          - bullet list. 1. num list. [ ] for todo. ⌘ + Enter to check
+        </div>
+      )}
     </div>
   );
 }

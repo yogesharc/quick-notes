@@ -337,31 +337,18 @@ button {
   min-height: 0;
 }
 
-/* The mirror and the textarea must lay text out identically, character for
-   character, or the caret drifts away from the text you can see. */
-.editor,
-.editor-mirror {
-  position: absolute;
-  inset: 0;
-  margin: 0;
+.editor {
+  height: 100%;
   padding: 12px 20px 32px;
-  border: none;
-  font-family: inherit;
+  overflow-y: auto;
+  outline: none;
+  color: var(--text);
   font-size: 14px;
   line-height: 1.5;
   letter-spacing: -0.003em;
   white-space: pre-wrap;
   overflow-wrap: break-word;
   tab-size: 4;
-}
-
-.editor {
-  outline: none;
-  resize: none;
-  background: transparent;
-  color: transparent;
-  caret-color: #6ea8ff;
-  overflow-y: auto;
   scrollbar-width: none;
   -webkit-user-select: text;
   user-select: text;
@@ -371,25 +358,43 @@ button {
   width: 0;
 }
 
-.editor::placeholder {
-  color: rgba(235, 235, 245, 0.26);
-}
-
-.editor-mirror {
-  overflow: hidden;
+.editor-placeholder {
+  position: absolute;
+  top: 12px;
+  left: 20px;
+  right: 20px;
   pointer-events: none;
-  color: var(--text);
+  color: rgba(235, 235, 245, 0.26);
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: -0.003em;
 }
 
-.todo-box {
+/* padding-left and text-indent are set per line from the marker's measured
+   width, which is what makes wrapped text hang under the first line's text. */
+.ln {
+  min-height: 1.5em;
+}
+
+.ln.is-item + .ln.is-item {
+  margin-top: 3px;
+}
+
+.marker {
+  /* The marker's trailing space is load-bearing for the hanging indent. */
+  white-space: pre;
+}
+
+.box {
   color: var(--todo);
+  cursor: pointer;
 }
 
-.todo-box.is-done {
+.box.is-done {
   color: var(--todo-done);
 }
 
-.todo-label.is-done {
+.label.is-done {
   opacity: 0.42;
 }
 

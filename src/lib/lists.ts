@@ -1,34 +1,48 @@
 /**
- * Plain-text list behaviour for a <textarea>: bullets, numbers and todos that
- * continue themselves on Enter. Deliberately not markdown — nothing here reacts
- * to `*`, `_`, `#` or any other formatting character.
+ * Plain-text list behaviour: bullets, numbers and todos that continue
+ * themselves on Enter. Deliberately not markdown — nothing here reacts to `*`,
+ * `_`, `#` or any other formatting character.
+ *
+ * Every operation is a pure function over (text, selection) returning a single
+ * replacement, so the DOM layer stays free to apply it however it likes.
  */
 
-/** Swap these for any pair you like: □/■, ○/●, ⬜/✅. Must stay single-code-unit. */
 export const UNCHECKED = "○";
 export const CHECKED = "●";
 
+/** Typed bullets normalise to this. */
+export const BULLET_POINT = "•";
+
 const TODO = new RegExp(`^(\\s*)([${UNCHECKED}${CHECKED}])[ \\t]+`);
-const BULLET = /^(\s*)([-*+])[ \t]+/;
+const BULLET = /^(\s*)([-*+•])[ \t]+/;
 const ORDERED = /^(\s*)(\d+)([.)])[ \t]+/;
 
 /** `[]` or `[ ]`, alone or right after a bullet, with nothing else on the line. */
-const TODO_SHORTHAND = /^(\s*)(?:[-*+][ \t]+)?\[ ?\]$/;
+const TODO_SHORTHAND = /^(\s*)(?:[-*+•][ \t]+)?\[ ?\]$/;
 
-type Item = {
+/** A lone `-`, `*` or `+` holding the whole line. */
+const BULLET_SHORTHAND = /^(\s*)[-*+]$/;
+
+export type Item = {
+  kind: "todo" | "bullet" | "ordered";
   indent: string;
-  /** Everything after the marker and its trailing space. */
+  /** The marker including its trailing space, e.g. "○ ", "• ", "12. ". */
+  marker: string;
   content: string;
-  /** Marker to open the *next* item with, e.g. "- ", "3. ", "☐ ". */
+  checked: boolean;
+  /** The marker that opens the next item. */
   next: string;
 };
 
-function parseItem(line: string): Item | null {
+export function parseItem(line: string): Item | null {
   const todo = TODO.exec(line);
   if (todo) {
     return {
+      kind: "todo",
       indent: todo[1],
+      marker: todo[0].slice(todo[1].length),
       content: line.slice(todo[0].length),
+      checked: todo[2] === CHECKED,
       next: `${UNCHECKED} `,
     };
   }
@@ -36,17 +50,23 @@ function parseItem(line: string): Item | null {
   const bullet = BULLET.exec(line);
   if (bullet) {
     return {
+      kind: "bullet",
       indent: bullet[1],
+      marker: bullet[0].slice(bullet[1].length),
       content: line.slice(bullet[0].length),
-      next: `${bullet[2]} `,
+      checked: false,
+      next: `${BULLET_POINT} `,
     };
   }
 
   const ordered = ORDERED.exec(line);
   if (ordered) {
     return {
+      kind: "ordered",
       indent: ordered[1],
+      marker: ordered[0].slice(ordered[1].length),
       content: line.slice(ordered[0].length),
+      checked: false,
       next: `${Number(ordered[2]) + 1}${ordered[3]} `,
     };
   }
@@ -54,43 +74,13 @@ function parseItem(line: string): Item | null {
   return null;
 }
 
+/** A single replacement: swap `[from, to)` for `text` and put the caret at `caret`. */
+export type Edit = { from: number; to: number; text: string; caret: number };
+
 function lineBounds(value: string, from: number, to: number) {
   const start = value.lastIndexOf("\n", from - 1) + 1;
   const end = value.indexOf("\n", to);
   return { start, end: end === -1 ? value.length : end };
-}
-
-/**
- * Writes through the browser's own edit pipeline so the native undo stack and
- * React's onChange both stay intact. Falls back to poking the value setter
- * directly if execCommand is unavailable. Every path leaves the caret just past
- * the inserted text — engines disagree about where it lands otherwise.
- */
-function replaceRange(
-  el: HTMLTextAreaElement,
-  from: number,
-  to: number,
-  text: string,
-) {
-  el.focus();
-  el.setSelectionRange(from, to);
-
-  // An empty insertText is a no-op in WebKit, so deletions need their own command.
-  const applied = text
-    ? document.execCommand("insertText", false, text)
-    : document.execCommand("delete");
-
-  if (!applied) {
-    const setValue = Object.getOwnPropertyDescriptor(
-      HTMLTextAreaElement.prototype,
-      "value",
-    )?.set;
-    setValue?.call(el, el.value.slice(0, from) + text + el.value.slice(to));
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-  }
-
-  const caret = from + text.length;
-  el.setSelectionRange(caret, caret);
 }
 
 /** Numbered lines directly below `lineEnd` sharing `indent`, as one contiguous run. */
@@ -115,25 +105,22 @@ function orderedRun(value: string, lineEnd: number, indent: string) {
 }
 
 /** Enter inside a list item: open the next one, or drop out if this one is empty. */
-export function continueList(el: HTMLTextAreaElement): boolean {
-  const { value, selectionStart, selectionEnd } = el;
-  const { start: lineStart, end: lineEnd } = lineBounds(
-    value,
-    selectionStart,
-    selectionEnd,
-  );
-
-  const before = value.slice(lineStart, selectionStart);
-  const after = value.slice(selectionEnd, lineEnd);
+export function continueList(
+  value: string,
+  start: number,
+  end: number,
+): Edit | null {
+  const { start: lineStart, end: lineEnd } = lineBounds(value, start, end);
+  const before = value.slice(lineStart, start);
+  const after = value.slice(end, lineEnd);
 
   const item = parseItem(before);
   if (!item) {
-    return false;
+    return null;
   }
 
   if (!item.content.trim() && !after.trim()) {
-    replaceRange(el, lineStart, lineEnd, "");
-    return true;
+    return { from: lineStart, to: lineEnd, text: "", caret: lineStart };
   }
 
   const opener = `\n${item.indent}${item.next}`;
@@ -150,90 +137,87 @@ export function continueList(el: HTMLTextAreaElement): boolean {
       n += 1;
       return `${match[1]}${n}${match[3]} ${line.slice(match[0].length)}`;
     });
-    replaceRange(
-      el,
-      lineStart,
-      run.end,
-      [before + opener + after, ...renumbered].join("\n"),
-    );
-  } else {
-    replaceRange(el, lineStart, lineEnd, before + opener + after);
+    return {
+      from: lineStart,
+      to: run.end,
+      text: [before + opener + after, ...renumbered].join("\n"),
+      caret,
+    };
   }
 
-  el.setSelectionRange(caret, caret);
-  return true;
+  return { from: lineStart, to: lineEnd, text: before + opener + after, caret };
 }
 
-/** Space after `[]` / `[ ]` / `- []` turns the line into a todo. */
-export function expandTodoShorthand(el: HTMLTextAreaElement): boolean {
-  const { value, selectionStart, selectionEnd } = el;
-  if (selectionStart !== selectionEnd) {
-    return false;
-  }
-
-  const { start: lineStart } = lineBounds(value, selectionStart, selectionEnd);
-  const match = TODO_SHORTHAND.exec(value.slice(lineStart, selectionStart));
-  if (!match) {
-    return false;
-  }
-
-  replaceRange(el, lineStart, selectionStart, `${match[1]}${UNCHECKED} `);
-  return true;
-}
-
-/** Flip the checkbox on the line holding `pos`, leaving the caret where it was. */
-export function toggleTodo(el: HTMLTextAreaElement, pos: number): boolean {
-  const { value } = el;
-  const { start: lineStart, end: lineEnd } = lineBounds(value, pos, pos);
-  const match = TODO.exec(value.slice(lineStart, lineEnd));
-  if (!match) {
-    return false;
-  }
-
-  const box = lineStart + match[1].length;
-  replaceRange(el, box, box + 1, value[box] === UNCHECKED ? CHECKED : UNCHECKED);
-  el.setSelectionRange(pos, pos);
-  return true;
-}
-
-/** Splits a todo line so the checkbox and its label can be styled separately. */
-export function parseTodoLine(line: string) {
-  const match = TODO.exec(line);
-  if (!match) {
+/** Space turns `[]` into a checkbox and a lone `-` into a real bullet point. */
+export function expandShorthand(
+  value: string,
+  start: number,
+  end: number,
+): Edit | null {
+  if (start !== end) {
     return null;
   }
 
-  return {
-    indent: match[1],
-    box: match[2],
-    checked: match[2] === CHECKED,
-    // Keeps the marker's trailing whitespace so column alignment survives.
-    label: line.slice(match[1].length + 1),
-  };
+  const { start: lineStart } = lineBounds(value, start, end);
+  const line = value.slice(lineStart, start);
+
+  const todo = TODO_SHORTHAND.exec(line);
+  if (todo) {
+    const text = `${todo[1]}${UNCHECKED} `;
+    return { from: lineStart, to: start, text, caret: lineStart + text.length };
+  }
+
+  const bullet = BULLET_SHORTHAND.exec(line);
+  if (bullet) {
+    const text = `${bullet[1]}${BULLET_POINT} `;
+    return { from: lineStart, to: start, text, caret: lineStart + text.length };
+  }
+
+  return null;
 }
 
-/** A click counts as hitting the checkbox only if the caret landed on the glyph. */
-export function toggleTodoIfClicked(el: HTMLTextAreaElement): boolean {
-  const { value, selectionStart, selectionEnd } = el;
-  if (selectionStart !== selectionEnd) {
-    return false;
+/**
+ * Uppercases the first letter typed into any empty list item, so `[] k` reads
+ * `○ K`. Returns null for keys with no uppercase form, which skips scripts that
+ * don't have letter case at all.
+ */
+export function capitalizeItemStart(
+  value: string,
+  start: number,
+  end: number,
+  key: string,
+): Edit | null {
+  const upper = key.toUpperCase();
+  if (key.length !== 1 || upper === key || start !== end) {
+    return null;
   }
 
-  const { start: lineStart, end: lineEnd } = lineBounds(
-    value,
-    selectionStart,
-    selectionEnd,
-  );
-  const match = TODO.exec(value.slice(lineStart, lineEnd));
-  if (!match) {
-    return false;
+  const bounds = lineBounds(value, start, end);
+  if (value.slice(start, bounds.end).trim()) {
+    return null;
   }
 
-  const column = selectionStart - lineStart;
-  const box = match[1].length;
-  if (column < box || column > box + 1) {
-    return false;
+  const item = parseItem(value.slice(bounds.start, start));
+  if (!item || item.content.trim()) {
+    return null;
   }
 
-  return toggleTodo(el, selectionStart);
+  return { from: start, to: end, text: upper, caret: start + upper.length };
+}
+
+/** Flip the checkbox on the line holding `pos`, leaving the caret where it was. */
+export function toggleTodo(value: string, pos: number): Edit | null {
+  const { start, end } = lineBounds(value, pos, pos);
+  const item = parseItem(value.slice(start, end));
+  if (!item || item.kind !== "todo") {
+    return null;
+  }
+
+  const box = start + item.indent.length;
+  return {
+    from: box,
+    to: box + 1,
+    text: item.checked ? UNCHECKED : CHECKED,
+    caret: pos,
+  };
 }
