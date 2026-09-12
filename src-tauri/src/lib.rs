@@ -61,6 +61,47 @@ fn float_above_fullscreen(window: &tauri::WebviewWindow) -> Result<(), Box<dyn s
     Ok(())
 }
 
+/// The traffic lights sit in an overlay title bar with no chrome of its own,
+/// so they read as floating dots over the note list. Hidden by default and
+/// shown only while the pointer is over the topbar, driven from the frontend.
+#[cfg(target_os = "macos")]
+fn apply_traffic_lights(
+    window: &tauri::WebviewWindow,
+    visible: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use objc2_app_kit::{NSWindow, NSWindowButton};
+
+    let ns_window = unsafe { &*(window.ns_window()? as *mut NSWindow) };
+    for kind in [
+        NSWindowButton::CloseButton,
+        NSWindowButton::MiniaturizeButton,
+        NSWindowButton::ZoomButton,
+    ] {
+        if let Some(button) = ns_window.standardWindowButton(kind) {
+            button.setHidden(!visible);
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn set_traffic_lights(app: AppHandle, visible: bool) {
+    #[cfg(target_os = "macos")]
+    {
+        let Some(window) = app.get_webview_window("main") else {
+            return;
+        };
+        // standardWindowButton is AppKit: main thread only.
+        let _ = app.run_on_main_thread(move || {
+            if let Err(e) = apply_traffic_lights(&window, visible) {
+                eprintln!("[set_traffic_lights] {e}");
+            }
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, visible);
+}
+
 /// Puts the window on screen fully transparent. A window the window server
 /// can't see produces no frames, so a hidden webview doesn't paint at all —
 /// it only starts once the window is ordered in, which is what was left of
@@ -77,6 +118,7 @@ fn stage_overlay(window: &tauri::WebviewWindow) -> Result<(), Box<dyn std::error
     // underneath would land here instead during the staging window.
     ns_window.setIgnoresMouseEvents(true);
     ns_window.orderFrontRegardless();
+    apply_traffic_lights(window, false)?;
     Ok(())
 }
 
@@ -111,6 +153,8 @@ fn show_overlay(window: &tauri::WebviewWindow) -> Result<(), Box<dyn std::error:
 }
 
 fn reveal(app: &AppHandle) {
+    updater::check_in_background(app);
+
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
@@ -215,12 +259,12 @@ pub fn run() {
         .manage(Revealed::default())
         .invoke_handler(tauri::generate_handler![
             ready_to_show,
+            set_traffic_lights,
             new_note,
             get_note,
             update_note,
             list_notes,
             delete_note,
-            updater::check_update,
             updater::install_update
         ])
         .build(tauri::generate_context!())
@@ -252,9 +296,9 @@ pub fn run() {
                         .hidden_title(true)
                         .title_bar_style(tauri::TitleBarStyle::Overlay)
                         .effects(tauri::utils::config::WindowEffectsConfig {
-                            effects: vec![tauri::utils::WindowEffect::Sidebar],
+                            effects: vec![tauri::utils::WindowEffect::HudWindow],
                             state: Some(
-                                tauri::utils::WindowEffectState::FollowsWindowActiveState,
+                                tauri::utils::WindowEffectState::Active,
                             ),
                             radius: Some(12.0),
                             color: None,
@@ -272,6 +316,8 @@ pub fn run() {
                                 if let Err(e) = stage_overlay(&window) {
                                     eprintln!("[stage_overlay] {e}");
                                 }
+
+                                updater::start_check_loop(_app);
 
                                 let handle = _app.clone();
                                 std::thread::spawn(move || {

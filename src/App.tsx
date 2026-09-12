@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowLeftIcon, PlusIcon } from "@heroicons/react/24/outline";
+import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useNotes } from "./hooks/useNotes";
 import { useReadyToShow } from "./hooks/useReadyToShow";
 import { useUpdater } from "./hooks/useUpdater";
@@ -8,6 +10,12 @@ import NoteRow from "./components/NoteRow";
 import Shortcut from "./components/Shortcut";
 import UpdateBar from "./components/UpdateBar";
 import "./App.css";
+
+/// The traffic lights are hidden while the pointer is outside the window, so
+/// the app reads as a plain floating panel until you reach for it.
+const showTrafficLights = (visible: boolean) => {
+  void invoke("set_traffic_lights", { visible }).catch(() => {});
+};
 
 function App() {
   const {
@@ -29,6 +37,19 @@ function App() {
   const { updateVersion, install } = useUpdater();
 
   useReadyToShow(booted);
+
+  // Tracked off the native window, not the DOM: this is an accessory app that
+  // takes key status without a normal activation, so window blur/focus events
+  // don't line up with what the title bar is actually showing.
+  const [focused, setFocused] = useState(true);
+  useEffect(() => {
+    const unlisten = getCurrentWindow().onFocusChanged(({ payload }) =>
+      setFocused(payload),
+    );
+    return () => {
+      void unlisten.then((stop) => stop());
+    };
+  }, []);
 
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
@@ -84,8 +105,13 @@ function App() {
   }, [newNote, goBack]);
 
   return (
-    <main className="app">
-      <header className="topbar" data-tauri-drag-region="deep">
+    <main className="app" data-focused={focused}>
+      <header
+        className="topbar"
+        data-tauri-drag-region="deep"
+        onMouseEnter={() => showTrafficLights(true)}
+        onMouseLeave={() => showTrafficLights(false)}
+      >
         {selectedNoteId ? (
           <>
           <Shortcut letter="B" />
