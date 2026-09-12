@@ -189,6 +189,8 @@ pub fn run() {
             // Activating a Regular (Dock) app makes macOS switch to a Space
             // that owns its windows, kicking the user out of full-screen.
             // Accessory apps activate in place, so the overlay stays put.
+            // The bundle declares LSUIElement too (src-tauri/Info.plist) —
+            // this call only covers `tauri dev`, which runs the bare binary.
             #[cfg(target_os = "macos")]
             _app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             Ok(())

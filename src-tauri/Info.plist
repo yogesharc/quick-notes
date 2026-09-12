@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Declares the app Accessory (no Dock tile) to LaunchServices itself.
+	     set_activation_policy alone only changes the running NSApp: every
+	     LaunchServices open of an already-running app re-applies the type
+	     from this plist, so without the key a reopen put the icon back. -->
+	<key>LSUIElement</key>
+	<true/>
+</dict>
+</plist>
