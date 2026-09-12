@@ -23,7 +23,7 @@ cd "$(dirname "$0")/.."
 
 # Homebrew and pnpm are not on a non-login shell's PATH, and this script is as
 # likely to be run by an agent as by a person.
-export PATH="$HOME/Library/pnpm:/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH="$HOME/.cargo/bin:$HOME/Library/pnpm:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 for cmd in pnpm gh jq cargo; do
   command -v "$cmd" >/dev/null || { echo "missing required command: $cmd" >&2; exit 1; }
