@@ -147,6 +147,66 @@ pub fn run() {
             _app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             Ok(())
         })
+        // Close (⌘W, traffic light) and ⌘Q both hide instead of tearing
+        // down: the window and webview stay alive, so the next launch is an
+        // order-in (Reopen → reveal) instead of a ~0.5s cold boot. Hiding is
+        // orderOut on the window, not NSApp.hide — unhiding the app rebinds
+        // the window to the Desktop Space and kills float-over-fullscreen.
+        // Tearing the window down was never an option either: Tauri's close
+        // path leaves the NSWindow alive but unkeyable, the old ⌘W zombie.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
+        // The default menu binds ⌘Q to terminate:, which tao can't cancel,
+        // so the menu is rebuilt with ⌘Q as hide. There is no quit item: the
+        // updater relaunches on install and logout terminates like any app.
+        // Edit stays: without it the webview has no ⌘C/⌘V/⌘Z key equivalents.
+        .menu(|app| {
+            use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+            Menu::with_items(
+                app,
+                &[
+                    &Submenu::with_items(
+                        app,
+                        "Quick Notes",
+                        true,
+                        &[
+                            &MenuItem::with_id(app, "hide", "Hide Quick Notes", true, Some("CmdOrCtrl+Q"))?,
+                        ],
+                    )?,
+                    &Submenu::with_items(
+                        app,
+                        "File",
+                        true,
+                        &[&PredefinedMenuItem::close_window(app, None)?],
+                    )?,
+                    &Submenu::with_items(
+                        app,
+                        "Edit",
+                        true,
+                        &[
+                            &PredefinedMenuItem::undo(app, None)?,
+                            &PredefinedMenuItem::redo(app, None)?,
+                            &PredefinedMenuItem::separator(app)?,
+                            &PredefinedMenuItem::cut(app, None)?,
+                            &PredefinedMenuItem::copy(app, None)?,
+                            &PredefinedMenuItem::paste(app, None)?,
+                            &PredefinedMenuItem::select_all(app, None)?,
+                        ],
+                    )?,
+                ],
+            )
+        })
+        .on_menu_event(|app, event| {
+            if event.id() == "hide" {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updater::PendingUpdate::default())
