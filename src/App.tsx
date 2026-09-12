@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeftIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -52,6 +52,59 @@ function App() {
   }, []);
 
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+
+  // Keyboard highlight in the list. Clamped rather than reset, so a note
+  // disappearing (delete, or a narrowing search) can't strand it past the end.
+  const [highlight, setHighlight] = useState(0);
+  const activeIndex = Math.min(highlight, visibleNotes.length - 1);
+
+  useEffect(() => setHighlight(0), [searchKeyword]);
+
+  // On window, not the list: the search input holds focus while you arrow
+  // through results, and arrow keys would otherwise just move its caret.
+  useEffect(() => {
+    if (selectedNoteId || pendingDeleteId || visibleNotes.length === 0) {
+      return;
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        getNote(visibleNotes[activeIndex].id);
+        return;
+      }
+
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
+        return;
+      }
+
+      event.preventDefault();
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      setHighlight(
+        Math.min(Math.max(activeIndex + step, 0), visibleNotes.length - 1),
+      );
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectedNoteId, pendingDeleteId, visibleNotes, activeIndex]);
+
+  useEffect(() => {
+    document
+      .querySelector('.row[data-active="true"]')
+      ?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex]);
+
+  // Arrowing scrolls rows under a stationary cursor, and the browser reports
+  // that as a hover. Only a pointer that actually changed position counts.
+  const pointer = useRef({ x: -1, y: -1 });
+  function hover(index: number, event: { clientX: number; clientY: number }) {
+    if (event.clientX === pointer.current.x && event.clientY === pointer.current.y) {
+      return;
+    }
+    pointer.current = { x: event.clientX, y: event.clientY };
+    setHighlight(index);
+  }
 
   // Esc, or a click anywhere outside the row, backs out of a pending delete.
   useEffect(() => {
@@ -156,10 +209,12 @@ function App() {
         </div>
       ) : (
         <div className="list">
-          {visibleNotes.map((item) => (
+          {visibleNotes.map((item, index) => (
             <NoteRow
               key={item.id}
               note={item}
+              active={index === activeIndex}
+              onHover={(event) => hover(index, event)}
               confirming={pendingDeleteId === item.id}
               onOpen={() => getNote(item.id)}
               onDelete={() => setPendingDeleteId(item.id)}

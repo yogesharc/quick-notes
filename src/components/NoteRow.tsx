@@ -4,14 +4,18 @@ import { preview, relativeTime } from "../lib/format";
 
 export default function NoteRow({
   note,
+  active,
   confirming,
+  onHover,
   onOpen,
   onDelete,
   onConfirmDelete,
   onCancelDelete,
 }: {
   note: Note;
+  active: boolean;
   confirming: boolean;
+  onHover: (event: { clientX: number; clientY: number }) => void;
   onOpen: () => void;
   onDelete: () => void;
   onConfirmDelete: () => void;
@@ -41,7 +45,7 @@ export default function NoteRow({
   }
 
   return (
-    <div className="row">
+    <div className="row" data-active={active} onMouseMove={onHover}>
       <button type="button" className="row-open" onClick={onOpen}>
         <span className="row-title">{title}</span>
       </button>

@@ -202,7 +202,7 @@ button {
   transition: background 0.11s ease;
 }
 
-.row:hover {
+.row[data-active="true"] {
   background: var(--fill);
 }
 
