@@ -1,4 +1,7 @@
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Ok, Result};
 use chrono::{DateTime, Local};
@@ -59,10 +62,19 @@ pub fn get_note(id: String, app: &AppHandle) -> Result<Note> {
     })
 }
 
-pub fn update_note(id: String, contents: String, app: &AppHandle) -> Result<()> {
+/// Writes only when the contents actually changed, so merely opening a note does
+/// not bump its mtime. Returns the resulting modified time either way.
+fn write_if_changed(path: &Path, contents: &str) -> Result<DateTime<Local>> {
+    if !fs::read_to_string(path).is_ok_and(|existing| existing == contents) {
+        fs::write(path, contents)?;
+    }
+
+    Ok(DateTime::<Local>::from(fs::metadata(path)?.modified()?))
+}
+
+pub fn update_note(id: String, contents: String, app: &AppHandle) -> Result<DateTime<Local>> {
     let path = build_file_path(&id, app)?;
-    fs::write(path, contents)?;
-    Ok(())
+    write_if_changed(&path, &contents)
 }
 
 pub fn list_notes(app: &AppHandle) -> Result<Vec<Note>> {
@@ -112,4 +124,22 @@ pub fn delete_note(id: &str, app: &AppHandle) -> Result<()> {
     fs::remove_file(path)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unchanged_contents_keep_the_original_mtime() {
+        let path = std::env::temp_dir().join(format!("qn-{}.md", Uuid::new_v4()));
+
+        let first = write_if_changed(&path, "hello").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        assert_eq!(write_if_changed(&path, "hello").unwrap(), first);
+        assert!(write_if_changed(&path, "hello there").unwrap() > first);
+
+        fs::remove_file(&path).unwrap();
+    }
 }

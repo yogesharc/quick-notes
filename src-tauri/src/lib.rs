@@ -21,8 +21,10 @@ fn get_note(id: String, app: AppHandle) -> Result<Note, String> {
 }
 
 #[tauri::command]
-fn update_note(id: String, contents: String, app: AppHandle) -> Result<(), String> {
-    store::update_note(id, contents, &app).map_err(|e| e.to_string())
+fn update_note(id: String, contents: String, app: AppHandle) -> Result<String, String> {
+    store::update_note(id, contents, &app)
+        .map(|modified| modified.to_rfc3339())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

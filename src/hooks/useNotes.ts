@@ -62,8 +62,10 @@ export function useNotes() {
 
   async function updateNote(id: string, nextContents: string) {
     try {
-      await invoke("update_note", { id, contents: nextContents });
-      const modified = new Date().toISOString();
+      const modified = await invoke<string>("update_note", {
+        id,
+        contents: nextContents,
+      });
       setNotes((prev) =>
         prev.map((n) =>
           n.id === id ? { ...n, contents: nextContents, modified } : n,
