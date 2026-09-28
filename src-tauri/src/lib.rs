@@ -122,6 +122,85 @@ fn stage_overlay(window: &tauri::WebviewWindow) -> Result<(), Box<dyn std::error
     Ok(())
 }
 
+/// Hides the window by going back to the staged state rather than ordering it
+/// out. An ordered-out window stops tracking Spaces: full-screen Spaces
+/// created while it's out never get it, so summoning it there jumped to the
+/// Desktop, and sometimes it ended up in no Space at all (drawn nowhere until
+/// relaunch). Left ordered in at alpha 0 it keeps joining every Space.
+#[cfg(target_os = "macos")]
+fn hide_overlay(window: &tauri::WebviewWindow) -> Result<(), Box<dyn std::error::Error>> {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSApplication, NSWindow};
+
+    let ns_window = unsafe { &*(window.ns_window()? as *mut NSWindow) };
+    ns_window.setAlphaValue(0.0);
+    ns_window.setIgnoresMouseEvents(true);
+    apply_traffic_lights(window, false)?;
+
+    // The window stays key while invisible, so focus has to be handed to
+    // another app or the next keystrokes type into a note nobody can see.
+    // NSApp.deactivate() alone doesn't do it: nothing else becomes active.
+    // Activating the app underneath does, while this one is still active and
+    // so allowed to hand activation over.
+    let mtm = MainThreadMarker::new().ok_or("hide_overlay called off the main thread")?;
+    match app_below(ns_window.windowNumber() as u32) {
+        #[allow(deprecated)]
+        Some(below) => {
+            below.activateWithOptions(objc2_app_kit::NSApplicationActivationOptions::empty());
+        }
+        None => NSApplication::sharedApplication(mtm).deactivate(),
+    }
+    Ok(())
+}
+
+/// The app owning the frontmost normal window under `window_id` — what the
+/// overlay was sitting on, so it's where focus should go back to.
+#[cfg(target_os = "macos")]
+fn app_below(window_id: u32) -> Option<objc2::rc::Retained<objc2_app_kit::NSRunningApplication>> {
+    use objc2_app_kit::NSRunningApplication;
+    use objc2_core_foundation::{CFArray, CFDictionary, CFNumber, CFRetained, CFString, CFType};
+    use objc2_core_graphics::{
+        kCGWindowLayer, kCGWindowOwnerPID, CGWindowListCopyWindowInfo, CGWindowListOption,
+    };
+
+    let windows = CGWindowListCopyWindowInfo(
+        CGWindowListOption::OptionOnScreenBelowWindow
+            | CGWindowListOption::ExcludeDesktopElements,
+        window_id,
+    )?;
+    // SAFETY: CGWindowListCopyWindowInfo returns an array of dictionaries.
+    let windows: CFRetained<CFArray<CFDictionary<CFString, CFType>>> =
+        unsafe { CFRetained::cast_unchecked(windows) };
+    let int = |w: &CFDictionary<CFString, CFType>, key: &CFString| {
+        w.get(key)?.downcast::<CFNumber>().ok()?.as_i32()
+    };
+    let own_pid = std::process::id() as i32;
+
+    windows.iter().find_map(|w| {
+        let pid = unsafe { int(&w, kCGWindowOwnerPID)? };
+        // Layer 0 is ordinary app windows; above it are the menu bar, Dock,
+        // and other overlays that shouldn't take focus.
+        if pid == own_pid || unsafe { int(&w, kCGWindowLayer)? } != 0 {
+            return None;
+        }
+        NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
+    })
+}
+
+fn hide(app: &AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+
+    #[cfg(target_os = "macos")]
+    if let Err(e) = hide_overlay(&window) {
+        eprintln!("[hide_overlay] {e}");
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    let _ = window.hide();
+}
+
 /// Orders the window in without making it key first. The distinction matters:
 /// `show()`/`set_focus()` go through `makeKeyAndOrderFront`, and when a
 /// background app calls that while another app's full-screen Space is active,
@@ -196,16 +275,16 @@ pub fn run() {
             Ok(())
         })
         // Close (⌘W, traffic light) and ⌘Q both hide instead of tearing
-        // down: the window and webview stay alive, so the next launch is an
-        // order-in (Reopen → reveal) instead of a ~0.5s cold boot. Hiding is
-        // orderOut on the window, not NSApp.hide — unhiding the app rebinds
-        // the window to the Desktop Space and kills float-over-fullscreen.
+        // down: the window and webview stay alive, so the next launch is a
+        // reveal (Reopen) instead of a ~0.5s cold boot. Hiding is alpha 0
+        // (see hide_overlay), not NSApp.hide — unhiding the app rebinds the
+        // window to the Desktop Space and kills float-over-fullscreen.
         // Tearing the window down was never an option either: Tauri's close
         // path leaves the NSWindow alive but unkeyable, the old ⌘W zombie.
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                let _ = window.hide();
+                hide(window.app_handle());
             }
         })
         // The default menu binds ⌘Q to terminate:, which tao can't cancel,
@@ -250,9 +329,7 @@ pub fn run() {
         })
         .on_menu_event(|app, event| {
             if event.id() == "hide" {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.hide();
-                }
+                hide(app);
             }
         })
         .plugin(tauri_plugin_opener::init())

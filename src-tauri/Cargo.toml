@@ -33,11 +33,24 @@ uuid = { version = "1.24.1", features = ["v4"] }
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = [
   "std",
+  "libc",
   "NSApplication",
   "NSButton",
   "NSControl",
   "NSResponder",
+  "NSRunningApplication",
   "NSView",
   "NSWindow",
+] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = [
+  "std",
+  "CFArray",
+  "CFDictionary",
+  "CFNumber",
+  "CFString",
+] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = [
+  "std",
+  "CGWindow",
 ] }
 
